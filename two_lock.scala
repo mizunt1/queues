@@ -8,9 +8,7 @@ import scala.reflect.ClassTag
 
 class LinkedArrayList[T:ClassTag] extends ox.cads.collection.Queue[T]{
   // make two Reentrant locks, one for enq, one for deq
-  var num_nodes = new AtomicInteger(0)
   val capacity = 10
-  var num_items_in_end_nodes = new AtomicInteger(0)
   // max number of nodes
   var enqLock = new ReentrantLock()
   var deqLock = new ReentrantLock()
@@ -32,12 +30,10 @@ class LinkedArrayList[T:ClassTag] extends ox.cads.collection.Queue[T]{
   }
 
   def enqueue(x:T){
-    var mustWakeDequeuers = false;
     enqLock.lock()
     try {
-      while(num_nodes == capacity+1 & (num_items_in_end_nodes == capacity))
-        notFullCondition.await();
       if(tail.local_tail == capacity){
+        // if index is 10, create new node and insert 
         // if local_tail is full capacity, change to zero and add new node
         var new_node = new Node()
         new_node.data.set(0, x);
@@ -45,9 +41,6 @@ class LinkedArrayList[T:ClassTag] extends ox.cads.collection.Queue[T]{
         tail.next  = new_node;
         tail = new_node;
         //linearisation point
-        num_items_in_end_nodes.set(1);
-        num_nodes.getAndIncrement();
-        tail.local_tail += 1
       }
       else{
         // situation where we dont need to create a new node
@@ -55,72 +48,41 @@ class LinkedArrayList[T:ClassTag] extends ox.cads.collection.Queue[T]{
           // if the above succeeds, increment local_tail
           // local_tail gives last index not filled
         tail.local_tail +=1;
-        num_items_in_end_nodes.getAndIncrement()
-      }
-
-      if(head == tail && tail.local_tail == 1){
-        // if we have just gone from having no data at all, wake deq
-        mustWakeDequeuers = true
-
       }
     }
-  
     finally {
       enqLock.unlock();
-    }
-
-    if (mustWakeDequeuers){
-        deqLock.lock();
-      try{
-        notEmptyCondition.signalAll();
-      }
-      finally{
-        deqLock.unlock()
-      }
-    }
-
+    }  
   }
 
   def dequeue() : Option[T] = {
-    var mustWakeEnqueuers = true;
     var result:Option[T] = None
     deqLock.lock()
-
     try {
-      while(tail == head && tail.local_head == head.local_head)
-        notEmptyCondition.await();
-      if(head.local_head == capacity){
-        // if local head is 10, then there is only one item in this array
-        // get it and get rid of the node
+      if(head == tail && head.local_head == tail.local_tail)
+        // if local head has caught up with local tail, return none
+        // and keep local_head there
+      {
+        result = None
+      }
+
+      else if(head.local_head == capacity-1){
+        // if capacity is 4, and local_head is at 3, we must dequeue this item and 
+        // remove node
         result = Some(head.data.get(head.local_head));
+        // head.next definitely exists as otherwise, head == tail
         head = head.next;
-        num_nodes.getAndDecrement();
         // must reduce the number of nodes by 1
         head.local_head = 0
         // next item to be dequeued will be at index 
-        num_items_in_end_nodes.getAndDecrement()
       }
       else{
         result = Some(head.data.get(head.local_head))
-        num_items_in_end_nodes.getAndDecrement()
         head.local_head +=1
-      }
-      if(num_nodes == (capacity - 1) && num_items_in_end_nodes.get() == 9){
-        mustWakeEnqueuers = true;
-        // if dequeue ing from max capacity class, then must wake enqueuers
       }
     }
     finally {
       deqLock.unlock();
-    }
-    if (mustWakeEnqueuers){
-      enqLock.lock()
-      try {
-        notFullCondition.signalAll();
-      } 
-      finally {
-        enqLock.unlock();
-      }
     }
     return result
   }
