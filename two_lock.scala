@@ -66,14 +66,15 @@ class LinkedArrayList[T:ClassTag] extends ox.cads.collection.Queue[T]{
         result = None
       }
 
-      else if(head.local_head == capacity-1){
+      else if(head.local_head == capacity){
         // if capacity is 4, and local_head is at 3, we must dequeue this item and 
         // remove node
-        result = Some(head.data.get(head.local_head));
         // head.next definitely exists as otherwise, head == tail
         head = head.next;
         // must reduce the number of nodes by 1
-        head.local_head = 0
+        result = Some(head.data.get(head.local_head));
+        head.local_head = 1
+
         // next item to be dequeued will be at index 
       }
       else{
